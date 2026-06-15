@@ -1,6 +1,12 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { getStock, getCatalogue, getVentes } from "@/lib/notion";
+import {
+  getStock,
+  getCatalogue,
+  getVentes,
+  creerCommandeFournisseur,
+} from "@/lib/notion";
+import { envoyerEmail } from "@/lib/email";
 
 const consulterStock = tool({
   description:
@@ -116,8 +122,177 @@ const consulterVentes = tool({
   },
 });
 
+const envoyerCommandeFournisseur = tool({
+  description:
+    "Envoie une vraie commande à un fournisseur pour un ingrédient : récupère " +
+    "ses coordonnées dans le stock, envoie l'email et enregistre la commande " +
+    "dans le registre. À utiliser UNIQUEMENT après que Madeleine a explicitement " +
+    "confirmé l'envoi. L'objet et le corps de l'email doivent avoir été rédigés " +
+    "et montrés à Madeleine au préalable.",
+  inputSchema: z.object({
+    ingredient: z
+      .string()
+      .describe("Nom de l'ingrédient à commander, ex. 'Farine T65'"),
+    quantite: z
+      .number()
+      .describe("Quantité à commander, dans l'unité de l'ingrédient"),
+    objet: z.string().describe("Objet de l'email envoyé au fournisseur"),
+    corps: z.string().describe("Corps de l'email, rédigé pour le fournisseur"),
+  }),
+  execute: async ({ ingredient, quantite, objet, corps }) => {
+    const stock = await getStock();
+    const needle = ingredient.toLowerCase();
+    const item =
+      stock.find((entry) => entry.ingredient.toLowerCase() === needle) ??
+      stock.find((entry) => entry.ingredient.toLowerCase().includes(needle));
+
+    if (!item) {
+      return {
+        succes: false,
+        erreur: `Ingrédient "${ingredient}" introuvable dans le stock.`,
+      };
+    }
+    if (!item.fournisseur || !item.emailFournisseur) {
+      return {
+        succes: false,
+        erreur: `Aucun fournisseur ou email enregistré pour ${item.ingredient}.`,
+      };
+    }
+
+    const montantEstime =
+      item.prixUnitaire !== null
+        ? Math.round(item.prixUnitaire * quantite * 100) / 100
+        : null;
+    const date = new Date().toISOString().slice(0, 10);
+    const reference = `CMD-${date}-${item.ingredient.replace(/[^A-Za-z0-9]/g, "").slice(0, 12)}`;
+    const produitsCommandes = `${quantite} ${item.unite ?? ""} ${item.ingredient}`.trim();
+
+    await envoyerEmail({ destinataire: item.emailFournisseur, objet, corps });
+
+    await creerCommandeFournisseur({
+      reference,
+      fournisseur: item.fournisseur,
+      date,
+      produitsCommandes,
+      montantEstime,
+      emailDestinataire: item.emailFournisseur,
+      statut: "Envoyée",
+    });
+
+    return {
+      succes: true,
+      reference,
+      fournisseur: item.fournisseur,
+      destinataire: item.emailFournisseur,
+      produitsCommandes,
+      montantEstime,
+      statut: "Envoyée",
+    };
+  },
+});
+
+type ArticleAntiGaspi =
+  | { produit: string; introuvable: true }
+  | {
+      produit: string;
+      categorie: string | null;
+      quantite: number;
+      prixNormal: number;
+      prixRemise: number;
+      margeRestanteUnitaire: number;
+      remiseLimiteeParCout: boolean;
+    };
+
+const planAntiGaspi = tool({
+  description:
+    "Construit un plan anti-gaspillage pour des produits invendus en fin de " +
+    "journée. Calcule une remise qui reste rentable (jamais en dessous du coût " +
+    "de revient), chiffre la recette récupérée vs le plein tarif, et propose un " +
+    "panier surprise. À utiliser quand Madeleine veut écouler des invendus. " +
+    "Sers-toi des chiffres renvoyés pour rédiger ensuite une promo ou un post " +
+    "réseaux sociaux dans la voix de Madeleine.",
+  inputSchema: z.object({
+    invendus: z
+      .array(
+        z.object({
+          produit: z.string().describe("Nom du produit invendu"),
+          quantite: z.number().describe("Quantité restante invendue"),
+        }),
+      )
+      .describe("Liste des produits invendus à écouler"),
+    remisePct: z
+      .number()
+      .optional()
+      .describe("Remise souhaitée en pourcentage (défaut 30)"),
+  }),
+  execute: async ({ invendus, remisePct }) => {
+    const remise = remisePct ?? 30;
+    const catalogue = await getCatalogue();
+    const arrondi = (valeur: number) => Math.round(valeur * 100) / 100;
+
+    const articles: ArticleAntiGaspi[] = invendus.map((ligne) => {
+      const needle = ligne.produit.toLowerCase();
+      const produit =
+        catalogue.find((entry) => entry.produit.toLowerCase() === needle) ??
+        catalogue.find((entry) => entry.produit.toLowerCase().includes(needle));
+
+      if (!produit || produit.prixVenteTTC === null) {
+        return { produit: ligne.produit, introuvable: true };
+      }
+
+      const cout = produit.coutRevient ?? 0;
+      const prixVoulu = arrondi(produit.prixVenteTTC * (1 - remise / 100));
+      const remiseLimiteeParCout = prixVoulu < cout;
+      const prixRemise = remiseLimiteeParCout ? arrondi(cout) : prixVoulu;
+
+      return {
+        produit: produit.produit,
+        categorie: produit.categorie,
+        quantite: ligne.quantite,
+        prixNormal: produit.prixVenteTTC,
+        prixRemise,
+        margeRestanteUnitaire: arrondi(prixRemise - cout),
+        remiseLimiteeParCout,
+      };
+    });
+
+    const valides = articles.filter(
+      (article): article is Extract<ArticleAntiGaspi, { prixNormal: number }> =>
+        !("introuvable" in article),
+    );
+
+    const valeurSiVenduPleinTarif = arrondi(
+      valides.reduce((total, a) => total + a.prixNormal * a.quantite, 0),
+    );
+    const recetteEstimee = arrondi(
+      valides.reduce((total, a) => total + a.prixRemise * a.quantite, 0),
+    );
+
+    const panierSurprise =
+      valides.length > 1
+        ? {
+            contenu: valides.map((a) => `${a.quantite} ${a.produit}`).join(", "),
+            prixSuggere: recetteEstimee,
+          }
+        : null;
+
+    return {
+      remiseAppliquee: remise,
+      articles,
+      impact: {
+        valeurSiVenduPleinTarif,
+        recetteEstimee,
+        ecartVsPleinTarif: arrondi(valeurSiVenduPleinTarif - recetteEstimee),
+      },
+      panierSurprise,
+    };
+  },
+});
+
 export const theoTools = {
   consulterStock,
   consulterCatalogue,
   consulterVentes,
+  envoyerCommandeFournisseur,
+  planAntiGaspi,
 };

@@ -1,15 +1,28 @@
 import { describe, test, expect, vi, beforeEach } from "vitest";
 
-const { getStockMock, getCatalogueMock, getVentesMock } = vi.hoisted(() => ({
+const {
+  getStockMock,
+  getCatalogueMock,
+  getVentesMock,
+  creerCommandeMock,
+  envoyerEmailMock,
+} = vi.hoisted(() => ({
   getStockMock: vi.fn(),
   getCatalogueMock: vi.fn(),
   getVentesMock: vi.fn(),
+  creerCommandeMock: vi.fn(),
+  envoyerEmailMock: vi.fn(),
 }));
 
 vi.mock("@/lib/notion", () => ({
   getStock: getStockMock,
   getCatalogue: getCatalogueMock,
   getVentes: getVentesMock,
+  creerCommandeFournisseur: creerCommandeMock,
+}));
+
+vi.mock("@/lib/email", () => ({
+  envoyerEmail: envoyerEmailMock,
 }));
 
 import { theoTools } from "@/lib/theo/tools";
@@ -27,6 +40,8 @@ beforeEach(() => {
   getStockMock.mockReset();
   getCatalogueMock.mockReset();
   getVentesMock.mockReset();
+  creerCommandeMock.mockReset();
+  envoyerEmailMock.mockReset();
 });
 
 describe("Given a stock with one ingredient below threshold and one above", () => {
@@ -131,6 +146,148 @@ describe("Given no sales over the requested period", () => {
       const result = (await run(theoTools.consulterVentes, {})) as { lignes: number };
 
       expect(result.lignes).toBe(0);
+    });
+  });
+});
+
+describe("Given an ingredient in stock with a known supplier", () => {
+  describe("When the supplier order tool is run", () => {
+    test("Then the email is sent to the supplier address from the stock", async () => {
+      getStockMock.mockResolvedValue([beurre, farine]);
+      envoyerEmailMock.mockResolvedValue({ messageId: "abc" });
+      creerCommandeMock.mockResolvedValue(undefined);
+
+      await run(theoTools.envoyerCommandeFournisseur, {
+        ingredient: "Beurre AOP",
+        quantite: 4,
+        objet: "Commande beurre",
+        corps: "Bonjour, je commande 4 kg de beurre.",
+      });
+
+      expect(envoyerEmailMock).toHaveBeenCalledWith(
+        expect.objectContaining({ destinataire: "commandes@laiterie.fr" }),
+      );
+    });
+
+    test("Then the order is recorded in the supplier order register", async () => {
+      getStockMock.mockResolvedValue([beurre, farine]);
+      envoyerEmailMock.mockResolvedValue({ messageId: "abc" });
+      creerCommandeMock.mockResolvedValue(undefined);
+
+      await run(theoTools.envoyerCommandeFournisseur, {
+        ingredient: "Beurre AOP",
+        quantite: 4,
+        objet: "Commande beurre",
+        corps: "Bonjour, je commande 4 kg de beurre.",
+      });
+
+      expect(creerCommandeMock).toHaveBeenCalledWith(
+        expect.objectContaining({ fournisseur: "Laiterie du Midi", statut: "Envoyée" }),
+      );
+    });
+
+    test("Then the estimated amount is the quantity times the unit price", async () => {
+      getStockMock.mockResolvedValue([beurre, farine]);
+      envoyerEmailMock.mockResolvedValue({ messageId: "abc" });
+      creerCommandeMock.mockResolvedValue(undefined);
+
+      const result = (await run(theoTools.envoyerCommandeFournisseur, {
+        ingredient: "Beurre AOP",
+        quantite: 4,
+        objet: "Commande beurre",
+        corps: "Bonjour, je commande 4 kg de beurre.",
+      })) as { montantEstime: number };
+
+      expect(result.montantEstime).toBe(30);
+    });
+  });
+});
+
+describe("Given an ingredient that is not in the stock", () => {
+  describe("When the supplier order tool is run", () => {
+    test("Then it reports a failure", async () => {
+      getStockMock.mockResolvedValue([beurre, farine]);
+
+      const result = (await run(theoTools.envoyerCommandeFournisseur, {
+        ingredient: "Caviar",
+        quantite: 1,
+        objet: "Commande",
+        corps: "Bonjour",
+      })) as { succes: boolean };
+
+      expect(result.succes).toBe(false);
+    });
+
+    test("Then no email is sent", async () => {
+      getStockMock.mockResolvedValue([beurre, farine]);
+
+      await run(theoTools.envoyerCommandeFournisseur, {
+        ingredient: "Caviar",
+        quantite: 1,
+        objet: "Commande",
+        corps: "Bonjour",
+      });
+
+      expect(envoyerEmailMock).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe("Given unsold products that exist in the catalogue", () => {
+  describe("When the anti-waste tool applies the default discount", () => {
+    test("Then the discounted price is the normal price minus the discount", async () => {
+      getCatalogueMock.mockResolvedValue([eclair, baguette]);
+
+      const result = (await run(theoTools.planAntiGaspi, {
+        invendus: [{ produit: "Éclair au chocolat", quantite: 4 }],
+      })) as { articles: { prixRemise: number }[] };
+
+      expect(result.articles[0].prixRemise).toBe(2.45);
+    });
+
+    test("Then the estimated revenue sums the discounted lines", async () => {
+      getCatalogueMock.mockResolvedValue([eclair, baguette]);
+
+      const result = (await run(theoTools.planAntiGaspi, {
+        invendus: [{ produit: "Éclair au chocolat", quantite: 4 }],
+      })) as { impact: { recetteEstimee: number } };
+
+      expect(result.impact.recetteEstimee).toBe(9.8);
+    });
+  });
+});
+
+describe("Given a discount that would drop below the cost price", () => {
+  describe("When the anti-waste tool computes the plan", () => {
+    test("Then the discounted price is floored at the cost price", async () => {
+      getCatalogueMock.mockResolvedValue([eclair, baguette]);
+
+      const result = (await run(theoTools.planAntiGaspi, {
+        invendus: [{ produit: "Éclair au chocolat", quantite: 1 }],
+        remisePct: 80,
+      })) as { articles: { prixRemise: number; remiseLimiteeParCout: boolean }[] };
+
+      expect(result.articles[0]).toMatchObject({
+        prixRemise: 1.1,
+        remiseLimiteeParCout: true,
+      });
+    });
+  });
+});
+
+describe("Given several different unsold products", () => {
+  describe("When the anti-waste tool computes the plan", () => {
+    test("Then it suggests a surprise basket bundling them", async () => {
+      getCatalogueMock.mockResolvedValue([eclair, baguette]);
+
+      const result = (await run(theoTools.planAntiGaspi, {
+        invendus: [
+          { produit: "Éclair au chocolat", quantite: 2 },
+          { produit: "Baguette tradition", quantite: 3 },
+        ],
+      })) as { panierSurprise: { contenu: string } | null };
+
+      expect(result.panierSurprise?.contenu).toContain("Éclair au chocolat");
     });
   });
 });

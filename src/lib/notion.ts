@@ -166,3 +166,40 @@ export async function getVentes(options: {
     return true;
   });
 }
+
+export type NouvelleCommande = {
+  reference: string;
+  fournisseur: string;
+  date: string;
+  produitsCommandes: string;
+  montantEstime: number | null;
+  emailDestinataire: string;
+  statut: "Brouillon" | "Envoyée" | "Confirmée" | "Livrée";
+  notes?: string;
+};
+
+export async function creerCommandeFournisseur(
+  commande: NouvelleCommande,
+): Promise<void> {
+  const dataSourceId = await resolveDataSource(DATABASES.commandes);
+
+  await notion.pages.create({
+    parent: { type: "data_source_id", data_source_id: dataSourceId },
+    properties: {
+      "Référence commande": {
+        title: [{ text: { content: commande.reference } }],
+      },
+      Fournisseur: { select: { name: commande.fournisseur } },
+      "Date commande": { date: { start: commande.date } },
+      "Produits commandés": {
+        rich_text: [{ text: { content: commande.produitsCommandes } }],
+      },
+      "Montant estimé (€)": { number: commande.montantEstime },
+      "Email envoyé à": { email: commande.emailDestinataire },
+      Statut: { select: { name: commande.statut } },
+      Notes: {
+        rich_text: commande.notes ? [{ text: { content: commande.notes } }] : [],
+      },
+    },
+  } as Parameters<typeof notion.pages.create>[0]);
+}

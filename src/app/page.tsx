@@ -7,6 +7,8 @@ const TOOL_LABELS: Record<string, string> = {
   consulterStock: "📦 consulte le stock",
   consulterCatalogue: "🥖 consulte le catalogue",
   consulterVentes: "📊 analyse les ventes",
+  envoyerCommandeFournisseur: "📧 envoie la commande",
+  planAntiGaspi: "♻️ plan anti-gaspillage",
 };
 
 const SUGGESTIONS = [
