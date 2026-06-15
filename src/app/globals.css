@@ -1,0 +1,23 @@
+:root {
+  --pain: #c9a063;
+  --croute: #8a5a3c;
+  --farine: #faf6ef;
+  --texte: #2b2018;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--farine);
+  color: var(--texte);
+}
