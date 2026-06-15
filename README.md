@@ -20,7 +20,7 @@ confirmation avant d'engager une dépense.
 | --- | --- | --- |
 | Langage | TypeScript | Stack maîtrisée, intégration directe front/back |
 | Agent | Vercel AI SDK | Tool-calling natif, code lisible, prêt pour le web |
-| LLM | OpenAI (GPT) | Excellent raisonnement et tool-calling |
+| LLM | Claude (Anthropic) | Excellent raisonnement et tool-calling |
 | Données | Notion SDK | Base fournie par AI Sisters |
 | Email | Nodemailer + Gmail SMTP | Envoi réel de commande fournisseur |
 | Interface | Next.js (App Router) | UI chat légère, exécutable en local |
@@ -42,11 +42,11 @@ cp .env.example .env.local   # puis renseigne tes clés
 npm run dev
 ```
 
-Ouvre http://localhost:3000
+Ouvre http://localhost:3100
 
 ## Variables d'environnement
 
-Voir [.env.example](.env.example). Il faut une clé OpenAI, le token Notion +
+Voir [.env.example](.env.example). Il faut une clé Anthropic, le token Notion +
 les IDs des 4 bases, et des identifiants SMTP Gmail (mot de passe d'application).
 
 ## Architecture

@@ -1,4 +1,4 @@
-import { getStock, getCatalogue, getVentes } from "../src/lib/notion.ts";
+import { getStock, getCatalogue, getVentes } from "../src/lib/notion";
 
 async function main() {
   const stock = await getStock();
