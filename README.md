@@ -49,6 +49,18 @@ Ouvre http://localhost:3100
 Voir [.env.example](.env.example). Il faut une clé Anthropic, le token Notion +
 les IDs des 4 bases, et des identifiants SMTP Gmail (mot de passe d'application).
 
+## Tests
+
+Tests unitaires avec **Vitest**, en style BDD (Given-When-Then, structure
+Arrange-Act-Assert). Seules les frontières externes sont mockées (l'API Notion) :
+la vraie logique métier (mapping des données, calcul des seuils, filtres,
+agrégation des ventes) est testée sans I/O réelle.
+
+```bash
+pnpm test         # lance la suite une fois
+pnpm test:watch   # mode watch
+```
+
 ## Architecture
 
 _À compléter au fil des étapes._
