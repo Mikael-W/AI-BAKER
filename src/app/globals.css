@@ -128,6 +128,48 @@ body {
   padding: 0.2rem 0.55rem;
 }
 
+.approval {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.8rem 1rem;
+  background: #fff;
+  border: 1px solid var(--pain);
+  border-radius: 0.9rem;
+}
+
+.approval__title {
+  font-weight: 600;
+  color: var(--croute);
+}
+
+.approval__obj {
+  font-size: 0.85rem;
+  color: #6b5d49;
+}
+
+.approval__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.approval__actions button {
+  padding: 0.5rem 0.9rem;
+  border: none;
+  border-radius: 0.6rem;
+  background: var(--croute);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.approval__actions .approval__cancel {
+  background: #fff;
+  color: var(--croute);
+  border: 1px solid #d9cbb0;
+}
+
 .chat__input {
   display: flex;
   gap: 0.5rem;

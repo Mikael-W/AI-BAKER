@@ -1,4 +1,4 @@
-import type { Ingredient, Produit, Vente } from "@/lib/notion";
+import type { Ingredient, Produit, Vente } from "@/lib/notion/notion";
 
 export const beurre: Ingredient = {
   ingredient: "Beurre AOP",

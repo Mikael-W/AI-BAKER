@@ -5,8 +5,16 @@ import {
   getCatalogue,
   getVentes,
   creerCommandeFournisseur,
-} from "@/lib/notion";
-import { envoyerEmail } from "@/lib/email";
+} from "@/lib/notion/notion";
+import { envoyerEmail } from "@/lib/email/email";
+import { getMeteo, type Meteo } from "@/lib/weather/weather";
+
+const normaliser = (texte: string) =>
+  texte
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .trim();
 
 const consulterStock = tool({
   description:
@@ -49,20 +57,25 @@ const consulterCatalogue = tool({
       .optional()
       .describe("Nom (même partiel) d'un produit pour filtrer, ex. 'éclair'"),
     categorie: z
-      .enum(["Pain", "Viennoiserie", "Pâtisserie", "Snacking"])
+      .string()
       .optional()
-      .describe("Filtrer par catégorie de produit"),
+      .describe(
+        "Filtrer par catégorie, ex. Pain, Viennoiserie, Pâtisserie, Snacking",
+      ),
   }),
   execute: async ({ produit, categorie }) => {
     let catalogue = await getCatalogue();
     if (produit) {
-      const needle = produit.toLowerCase();
+      const aiguille = normaliser(produit);
       catalogue = catalogue.filter((item) =>
-        item.produit.toLowerCase().includes(needle),
+        normaliser(item.produit).includes(aiguille),
       );
     }
     if (categorie) {
-      catalogue = catalogue.filter((item) => item.categorie === categorie);
+      const cible = normaliser(categorie);
+      catalogue = catalogue.filter(
+        (item) => item.categorie !== null && normaliser(item.categorie) === cible,
+      );
     }
     return catalogue;
   },
@@ -126,9 +139,10 @@ const envoyerCommandeFournisseur = tool({
   description:
     "Envoie une vraie commande à un fournisseur pour un ingrédient : récupère " +
     "ses coordonnées dans le stock, envoie l'email et enregistre la commande " +
-    "dans le registre. À utiliser UNIQUEMENT après que Madeleine a explicitement " +
-    "confirmé l'envoi. L'objet et le corps de l'email doivent avoir été rédigés " +
-    "et montrés à Madeleine au préalable.",
+    "dans le registre. Rédige d'abord l'objet et le corps de l'email. L'envoi " +
+    "déclenchera une demande de confirmation à Madeleine : il ne part que si " +
+    "elle valide.",
+  needsApproval: true,
   inputSchema: z.object({
     ingredient: z
       .string()
@@ -289,10 +303,106 @@ const planAntiGaspi = tool({
   },
 });
 
+const JOURS = [
+  "Dimanche",
+  "Lundi",
+  "Mardi",
+  "Mercredi",
+  "Jeudi",
+  "Vendredi",
+  "Samedi",
+];
+
+function facteurMeteo(meteo: Meteo | null): number {
+  if (!meteo) return 1;
+  let facteur = 1;
+  if ((meteo.precipitationMm ?? 0) >= 5) facteur *= 0.85;
+  else if ((meteo.precipitationMm ?? 0) >= 1) facteur *= 0.93;
+  if ((meteo.temperatureMax ?? 0) >= 28) facteur *= 1.1;
+  return Math.round(facteur * 100) / 100;
+}
+
+const prevoirProduction = tool({
+  description:
+    "Estime les quantités à préparer pour un jour donné en croisant l'historique " +
+    "des ventes (par jour de semaine) et la météo prévue. Renvoie, par produit, " +
+    "la moyenne historique de ce jour et une recommandation ajustée à la météo. " +
+    "À utiliser pour 'combien je prépare demain ?'. Appuie-toi sur ces chiffres " +
+    "pour donner un conseil clair et chiffré à Madeleine.",
+  inputSchema: z.object({
+    date: z
+      .string()
+      .optional()
+      .describe("Jour à préparer au format AAAA-MM-JJ (défaut : demain)"),
+    produits: z
+      .array(z.string())
+      .optional()
+      .describe("Limiter la prévision à certains produits (optionnel)"),
+  }),
+  execute: async ({ date, produits }) => {
+    const cible =
+      date ?? new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+    const [annee, mois, jourDuMois] = cible.split("-").map(Number);
+    const jour = JOURS[new Date(annee, mois - 1, jourDuMois).getDay()];
+
+    const ventes = await getVentes();
+    const ventesDuJour = ventes.filter((vente) => vente.jour === jour);
+
+    const cumulParProduit: Record<string, { total: number; jours: Set<string> }> =
+      {};
+    for (const vente of ventesDuJour) {
+      const nom = vente.produit ?? "Inconnu";
+      cumulParProduit[nom] ??= { total: 0, jours: new Set() };
+      cumulParProduit[nom].total += vente.quantiteVendue ?? 0;
+      if (vente.date) cumulParProduit[nom].jours.add(vente.date);
+    }
+
+    const meteo = await getMeteo(cible);
+    const facteur = facteurMeteo(meteo);
+
+    let lignes = Object.entries(cumulParProduit).map(([produit, cumul]) => {
+      const nbJoursObserves = cumul.jours.size || 1;
+      const moyenne = cumul.total / nbJoursObserves;
+      return {
+        produit,
+        quantiteMoyenneCeJour: Math.round(moyenne),
+        quantiteRecommandee: Math.round(moyenne * facteur),
+        joursObserves: cumul.jours.size,
+      };
+    });
+
+    if (produits?.length) {
+      const aiguilles = produits.map((p) => p.toLowerCase());
+      lignes = lignes.filter((ligne) =>
+        aiguilles.some((aiguille) =>
+          ligne.produit.toLowerCase().includes(aiguille),
+        ),
+      );
+    }
+
+    lignes.sort((a, b) => b.quantiteRecommandee - a.quantiteRecommandee);
+
+    return {
+      date: cible,
+      jour,
+      meteo: meteo
+        ? {
+            resume: meteo.resume,
+            temperatureMax: meteo.temperatureMax,
+            precipitationMm: meteo.precipitationMm,
+          }
+        : null,
+      ajustementMeteoPct: Math.round((facteur - 1) * 100),
+      produits: lignes,
+    };
+  },
+});
+
 export const theoTools = {
   consulterStock,
   consulterCatalogue,
   consulterVentes,
   envoyerCommandeFournisseur,
   planAntiGaspi,
+  prevoirProduction,
 };

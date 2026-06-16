@@ -6,23 +6,29 @@ const {
   getVentesMock,
   creerCommandeMock,
   envoyerEmailMock,
+  getMeteoMock,
 } = vi.hoisted(() => ({
   getStockMock: vi.fn(),
   getCatalogueMock: vi.fn(),
   getVentesMock: vi.fn(),
   creerCommandeMock: vi.fn(),
   envoyerEmailMock: vi.fn(),
+  getMeteoMock: vi.fn(),
 }));
 
-vi.mock("@/lib/notion", () => ({
+vi.mock("@/lib/notion/notion", () => ({
   getStock: getStockMock,
   getCatalogue: getCatalogueMock,
   getVentes: getVentesMock,
   creerCommandeFournisseur: creerCommandeMock,
 }));
 
-vi.mock("@/lib/email", () => ({
+vi.mock("@/lib/email/email", () => ({
   envoyerEmail: envoyerEmailMock,
+}));
+
+vi.mock("@/lib/weather/weather", () => ({
+  getMeteo: getMeteoMock,
 }));
 
 import { theoTools } from "@/lib/theo/tools";
@@ -42,6 +48,7 @@ beforeEach(() => {
   getVentesMock.mockReset();
   creerCommandeMock.mockReset();
   envoyerEmailMock.mockReset();
+  getMeteoMock.mockReset();
 });
 
 describe("Given a stock with one ingredient below threshold and one above", () => {
@@ -100,6 +107,16 @@ describe("Given a catalogue of several products", () => {
       })) as typeof eclair[];
 
       expect(result).toEqual([baguette]);
+    });
+
+    test("Then the category match ignores case and accents", async () => {
+      getCatalogueMock.mockResolvedValue([eclair, baguette]);
+
+      const result = (await run(theoTools.consulterCatalogue, {
+        categorie: "patisserie",
+      })) as typeof eclair[];
+
+      expect(result).toEqual([eclair]);
     });
   });
 });
@@ -288,6 +305,61 @@ describe("Given several different unsold products", () => {
       })) as { panierSurprise: { contenu: string } | null };
 
       expect(result.panierSurprise?.contenu).toContain("Éclair au chocolat");
+    });
+  });
+});
+
+type Prevision = {
+  jour: string;
+  produits: { produit: string; quantiteRecommandee: number }[];
+};
+
+const recommande = (prevision: Prevision, produit: string) =>
+  prevision.produits.find((ligne) => ligne.produit.includes(produit))
+    ?.quantiteRecommandee;
+
+describe("Given sales history for a given weekday and dry weather", () => {
+  describe("When forecasting production for that weekday", () => {
+    test("Then the recommendation equals the weekday average", async () => {
+      getVentesMock.mockResolvedValue(ventes);
+      getMeteoMock.mockResolvedValue(null);
+
+      const result = (await run(theoTools.prevoirProduction, {
+        date: "2026-01-05",
+      })) as Prevision;
+
+      expect(recommande(result, "Baguette")).toBe(100);
+    });
+
+    test("Then the resolved weekday is reported", async () => {
+      getVentesMock.mockResolvedValue(ventes);
+      getMeteoMock.mockResolvedValue(null);
+
+      const result = (await run(theoTools.prevoirProduction, {
+        date: "2026-01-05",
+      })) as Prevision;
+
+      expect(result.jour).toBe("Lundi");
+    });
+  });
+});
+
+describe("Given a rainy weather forecast", () => {
+  describe("When forecasting production for that weekday", () => {
+    test("Then the recommendation is reduced by the rain factor", async () => {
+      getVentesMock.mockResolvedValue(ventes);
+      getMeteoMock.mockResolvedValue({
+        date: "2026-01-05",
+        temperatureMax: 12,
+        precipitationMm: 6,
+        resume: "pluvieux",
+      });
+
+      const result = (await run(theoTools.prevoirProduction, {
+        date: "2026-01-05",
+      })) as Prevision;
+
+      expect(recommande(result, "Baguette")).toBe(85);
     });
   });
 });

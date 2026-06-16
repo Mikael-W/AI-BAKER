@@ -12,7 +12,7 @@ vi.mock("@notionhq/client", () => ({
   },
 }));
 
-import { getStock, getCatalogue, getVentes } from "@/lib/notion";
+import { getStock, getCatalogue, getVentes } from "./notion";
 
 const page = (results: unknown[], cursor: string | null = null) => ({
   results,
