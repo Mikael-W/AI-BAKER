@@ -142,7 +142,7 @@ pnpm test:watch   # mode watch
   manuelle des invendus.
 - **Planning de cuisson** : prolonger la prévision en planning du fournil
   (ordre et heures d'enfournement) en croisant temps de préparation et stocks.
-- **Canal réel** : WhatsApp Business plutôt qu'un navigateur — Madeleine a son
+- **Canal réel** : WhatsApp Business plutôt qu'un navigateur ou switch sur react native pour une application dédiée — Madeleine a son
   téléphone dans la poche du tablier, pas un terminal.
 
 **Technique / passage en production**
